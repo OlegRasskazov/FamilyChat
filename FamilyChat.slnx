@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/backend/">
+    <Project Path="backend/FamilyChat.Server.Domain/FamilyChat.Server.Domain.csproj" />
+    <Project Path="backend/FamilyChat.Server/FamilyChat.Server.csproj" />
+  </Folder>
+  <Folder Name="/frontend/">
+    <Project Path="frontend/familychat.client/familychat.client.esproj">
+      <Build />
+      <Deploy />
+    </Project>
+  </Folder>
+</Solution>
