@@ -1,5 +1,5 @@
-
 using FamilyChat.Server.Domain;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 
 namespace FamilyChat.Server
@@ -11,39 +11,62 @@ namespace FamilyChat.Server
             var builder = WebApplication.CreateBuilder(args);
 
             builder.Services.AddDbContext<ApplicationIdentityDbContext>(
-                options => options.UseNpgsql("Host=localhost;Port=5432;Database=IdentityDB;Username=family_chat;Password=pass"));
+                options => options.UseNpgsql(builder.Configuration.GetConnectionString("postgresql")));
+
+            builder.Services.AddAuthentication(options =>
+            {
+                options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+                options.DefaultChallengeScheme = "GoogleOpenIdConnect";
+            })
+                .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme)
+                .AddGoogleOpenIdConnect(googleOptions =>
+                {
+                    googleOptions.Authority = "https://accounts.google.com";
+                    googleOptions.ClientId = builder.Configuration["Authentication:Google:ClientId"];
+                    googleOptions.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"];
+                    googleOptions.ResponseType = "code";
+                    googleOptions.CallbackPath = "/signin-google";
+
+                    googleOptions.SaveTokens = true;
+
+                    googleOptions.Scope.Clear();
+                    googleOptions.Scope.Add("openid");
+                    googleOptions.Scope.Add("profile");
+                    googleOptions.Scope.Add("email");
+                });
 
             builder.Services.AddControllers();
             // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
             builder.Services.AddOpenApi();
+
 
             var app = builder.Build();
 
             app.UseDefaultFiles();
             app.MapStaticAssets();
 
-            // Configure the HTTP request pipeline.
+
             if (app.Environment.IsDevelopment())
             {
                 app.MapOpenApi();
+
+                using (var scope = app.Services.CreateScope())
+                {
+                    var db = scope.ServiceProvider.GetRequiredService<ApplicationIdentityDbContext>();
+                    db.Database.Migrate();
+                }
             }
 
             app.UseHttpsRedirection();
 
+            app.UseAuthentication();
             app.UseAuthorization();
-
 
             app.MapControllers();
 
             app.MapFallbackToFile("/index.html");
 
             app.Run();
-
-            using (var scope = app.Services.CreateScope())
-            {
-                var db = scope.ServiceProvider.GetRequiredService<ApplicationIdentityDbContext>();
-                db.Database.Migrate();
-            }
         }
     }
 }

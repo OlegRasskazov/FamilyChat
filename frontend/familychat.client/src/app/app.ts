@@ -16,23 +16,19 @@ interface WeatherForecast {
   styleUrl: './app.css'
 })
 export class App implements OnInit {
-  public forecasts: WeatherForecast[] = [];
+  public forecasts = signal<WeatherForecast[]>([]);
 
   constructor(private http: HttpClient) {}
 
   ngOnInit() {
-    this.getForecasts();
-  }
-
-  getForecasts() {
-    this.http.get<WeatherForecast[]>('/weatherforecast').subscribe(
-      (result) => {
-        this.forecasts = result;
+    this.http.get<WeatherForecast[]>('/weatherforecast').subscribe({
+      next: (result) => {
+        this.forecasts.set(result);
       },
-      (error) => {
+      error: (error) => {
         console.error(error);
       }
-    );
+    });
   }
 
   protected readonly title = signal('familychat.client');
