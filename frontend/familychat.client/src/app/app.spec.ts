@@ -36,10 +36,15 @@ describe('App', () => {
 
     component.ngOnInit();
 
+    const authReq = httpMock.expectOne('/auth/me');
+    expect(authReq.request.method).toEqual('GET');
+    authReq.flush({ isAuthenticated: false });
+
     const req = httpMock.expectOne('/weatherforecast');
     expect(req.request.method).toEqual('GET');
     req.flush(mockForecasts);
 
-    expect(component.forecasts).toEqual(mockForecasts);
+    expect(component.forecasts()).toEqual(mockForecasts);
+    expect(component.currentUser()).toBeNull();
   });
-};
+});
