@@ -16,7 +16,7 @@ namespace FamilyChat.Server
             builder.Services.AddDbContext<ApplicationIdentityDbContext>(
                 options => options.UseNpgsql(builder.Configuration.GetConnectionString("postgresql")));
 
-            builder.Services.AddIdentity<ChatUser, IdentityRole>(options =>
+            builder.Services.AddIdentity<User, IdentityRole>(options =>
             {
                 options.User.RequireUniqueEmail = true;
             })
@@ -68,7 +68,7 @@ namespace FamilyChat.Server
             app.UseAuthentication();
             app.UseAuthorization();
 
-            app.MapGet("/auth/login/google", (string? returnUrl, SignInManager<ChatUser> signInManager) =>
+            app.MapGet("/auth/login/google", (string? returnUrl, SignInManager<User> signInManager) =>
             {
                 var redirectUrl = $"/auth/login/google/callback?returnUrl={Uri.EscapeDataString(NormalizeReturnUrl(returnUrl))}";
                 var properties = signInManager.ConfigureExternalAuthenticationProperties("GoogleOpenIdConnect", redirectUrl);
@@ -78,8 +78,8 @@ namespace FamilyChat.Server
 
             app.MapGet("/auth/login/google/callback", async (
                 string? returnUrl,
-                UserManager<ChatUser> userManager,
-                SignInManager<ChatUser> signInManager) =>
+                UserManager<User> userManager,
+                SignInManager<User> signInManager) =>
             {
                 var safeReturnUrl = NormalizeReturnUrl(returnUrl);
                 var externalLoginInfo = await signInManager.GetExternalLoginInfoAsync();
@@ -113,7 +113,7 @@ namespace FamilyChat.Server
 
                 if (user is null)
                 {
-                    user = new ChatUser
+                    user = new User
                     {
                         UserName = email,
                         Email = email,
@@ -166,7 +166,7 @@ namespace FamilyChat.Server
                     },
                     [IdentityConstants.ApplicationScheme]));
 
-            app.MapGet("/auth/me", async (ClaimsPrincipal principal, UserManager<ChatUser> userManager) =>
+            app.MapGet("/auth/me", async (ClaimsPrincipal principal, UserManager<User> userManager) =>
             {
                 if (principal.Identity?.IsAuthenticated != true)
                 {
