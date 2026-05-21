@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FamilyChat.Server.Domain.Migrations
 {
     [DbContext(typeof(ApplicationIdentityDbContext))]
-    [Migration("20260520032502_Init")]
+    [Migration("20260521001039_Init")]
     partial class Init
     {
         /// <inheritdoc />
@@ -91,10 +91,6 @@ namespace FamilyChat.Server.Domain.Migrations
 
                     b.Property<DateTimeOffset?>("LockoutEnd")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Nickname")
-                        .IsRequired()
-                        .HasColumnType("text");
 
                     b.Property<string>("NormalizedEmail")
                         .HasMaxLength(256)

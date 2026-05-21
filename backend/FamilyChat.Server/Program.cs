@@ -3,12 +3,15 @@ using FamilyChat.Server.Domain.Entities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Concurrent;
 using System.Security.Claims;
 
 namespace FamilyChat.Server
 {
     public class Program
     {
+        private static readonly ConcurrentDictionary<string, string> GoogleLoginCodes = new();
+
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
@@ -16,14 +19,19 @@ namespace FamilyChat.Server
             builder.Services.AddDbContext<ApplicationIdentityDbContext>(
                 options => options.UseNpgsql(builder.Configuration.GetConnectionString("postgresql")));
 
-            builder.Services.AddIdentity<User, IdentityRole>(options =>
+            builder.Services.AddIdentityApiEndpoints<User>(options =>
             {
                 options.User.RequireUniqueEmail = true;
             })
+                .AddRoles<IdentityRole>()
                 .AddEntityFrameworkStores<ApplicationIdentityDbContext>()
                 .AddDefaultTokenProviders();
 
-            builder.Services.AddAuthentication()
+            builder.Services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = IdentityConstants.BearerScheme;
+                options.DefaultChallengeScheme = IdentityConstants.BearerScheme;
+            })
                 .AddGoogleOpenIdConnect(googleOptions =>
                 {
                     googleOptions.Authority = "https://accounts.google.com";
@@ -81,90 +89,99 @@ namespace FamilyChat.Server
                 UserManager<User> userManager,
                 SignInManager<User> signInManager) =>
             {
-                var safeReturnUrl = NormalizeReturnUrl(returnUrl);
                 var externalLoginInfo = await signInManager.GetExternalLoginInfoAsync();
 
                 if (externalLoginInfo is null)
                 {
-                    return Results.Redirect($"/auth/login/google?returnUrl={Uri.EscapeDataString(safeReturnUrl)}");
+                    return CreateGoogleLoginRedirectResult(false, "Google login information was not available.", null, returnUrl);
                 }
 
-                var signInResult = await signInManager.ExternalLoginSignInAsync(
+                var user = await userManager.FindByLoginAsync(
                     externalLoginInfo.LoginProvider,
-                    externalLoginInfo.ProviderKey,
-                    isPersistent: false,
-                    bypassTwoFactor: true);
-
-                if (signInResult.Succeeded)
-                {
-                    await signInManager.UpdateExternalAuthenticationTokensAsync(externalLoginInfo);
-                    return Results.LocalRedirect(safeReturnUrl);
-                }
-
-                var email = externalLoginInfo.Principal.FindFirstValue(ClaimTypes.Email) ??
-                    externalLoginInfo.Principal.FindFirstValue("email");
-
-                if (string.IsNullOrWhiteSpace(email))
-                {
-                    return Results.BadRequest("Google did not provide an email address.");
-                }
-
-                var user = await userManager.FindByEmailAsync(email);
+                    externalLoginInfo.ProviderKey);
 
                 if (user is null)
                 {
-                    user = new User
-                    {
-                        UserName = email,
-                        Email = email,
-                        EmailConfirmed = true
-                    };
+                    var email = externalLoginInfo.Principal.FindFirstValue(ClaimTypes.Email) ??
+                        externalLoginInfo.Principal.FindFirstValue("email");
 
-                    var createResult = await userManager.CreateAsync(user);
-
-                    if (!createResult.Succeeded)
+                    if (string.IsNullOrWhiteSpace(email))
                     {
-                        return Results.ValidationProblem(createResult.Errors.ToDictionary(
-                            error => error.Code,
-                            error => new[] { error.Description }));
+                        return CreateGoogleLoginRedirectResult(false, "Google did not provide an email address.", null, returnUrl);
                     }
-                }
 
-                var addLoginResult = await userManager.AddLoginAsync(user, externalLoginInfo);
+                    user = await userManager.FindByEmailAsync(email);
 
-                if (!addLoginResult.Succeeded)
-                {
-                    if (addLoginResult.Errors.Any(error => error.Code == "LoginAlreadyAssociated"))
+                    if (user is null)
                     {
-                        var linkedUser = await userManager.FindByLoginAsync(
-                            externalLoginInfo.LoginProvider,
-                            externalLoginInfo.ProviderKey);
-
-                        if (linkedUser is not null)
+                        user = new User
                         {
-                            await signInManager.SignInAsync(linkedUser, isPersistent: false);
-                            return Results.LocalRedirect(safeReturnUrl);
+                            UserName = externalLoginInfo.Principal.FindFirstValue("name")?.Replace(" ","") ?? email,
+                            Email = email,
+                            EmailConfirmed = true,
+                        };
+
+                        var createResult = await userManager.CreateAsync(user);
+
+                        if (!createResult.Succeeded)
+                        {
+                            return CreateGoogleLoginRedirectResult(
+                                false,
+                                createResult.Errors.FirstOrDefault()?.Description ?? "Could not create the user.",
+                                null,
+                                returnUrl);
                         }
                     }
 
-                    return Results.ValidationProblem(addLoginResult.Errors.ToDictionary(
-                        error => error.Code,
-                        error => new[] { error.Description }));
+                    var addLoginResult = await userManager.AddLoginAsync(user, externalLoginInfo);
+
+                    if (!addLoginResult.Succeeded)
+                    {
+                        if (addLoginResult.Errors.Any(error => error.Code == "LoginAlreadyAssociated"))
+                        {
+                            user = await userManager.FindByLoginAsync(
+                                externalLoginInfo.LoginProvider,
+                                externalLoginInfo.ProviderKey);
+
+                            if (user is not null)
+                            {
+                                return CreateGoogleLoginRedirectResult(true, null, CreateGoogleLoginCode(user), returnUrl);
+                            }
+                        }
+
+                        return CreateGoogleLoginRedirectResult(
+                            false,
+                            addLoginResult.Errors.FirstOrDefault()?.Description ?? "Could not link the Google login.",
+                            null,
+                            returnUrl);
+                    }
                 }
 
-                await signInManager.SignInAsync(user, isPersistent: false);
-                await signInManager.UpdateExternalAuthenticationTokensAsync(externalLoginInfo);
-
-                return Results.LocalRedirect(safeReturnUrl);
+                return CreateGoogleLoginRedirectResult(true, null, CreateGoogleLoginCode(user), returnUrl);
             });
 
-            app.MapGet("/auth/logout", (string? returnUrl) =>
-                Results.SignOut(
-                    new AuthenticationProperties
-                    {
-                        RedirectUri = NormalizeReturnUrl(returnUrl)
-                    },
-                    [IdentityConstants.ApplicationScheme]));
+            app.MapPost("/auth/login/google/token", async (
+                GoogleLoginTokenRequest request,
+                UserManager<User> userManager,
+                SignInManager<User> signInManager) =>
+            {
+                if (string.IsNullOrWhiteSpace(request.Code) ||
+                    !GoogleLoginCodes.TryRemove(request.Code, out var userId))
+                {
+                    return Results.BadRequest("Google login code is invalid or expired.");
+                }
+
+                var user = await userManager.FindByIdAsync(userId);
+
+                if (user is null)
+                {
+                    return Results.BadRequest("Google login user was not found.");
+                }
+
+                return await CreateBearerTokenResult(user, signInManager);
+            });
+
+            app.MapPost("/auth/logout", () => Results.NoContent());
 
             app.MapGet("/auth/me", async (ClaimsPrincipal principal, UserManager<User> userManager) =>
             {
@@ -192,6 +209,39 @@ namespace FamilyChat.Server
             app.Run();
         }
 
+        private static async Task<IResult> CreateBearerTokenResult(User user, SignInManager<User> signInManager)
+        {
+            var principal = await signInManager.CreateUserPrincipalAsync(user);
+            return Results.SignIn(principal, authenticationScheme: IdentityConstants.BearerScheme);
+        }
+
+        private static string CreateGoogleLoginCode(User user)
+        {
+            var code = Guid.NewGuid().ToString("N");
+            GoogleLoginCodes[code] = user.Id;
+            return code;
+        }
+
+        private static IResult CreateGoogleLoginRedirectResult(bool succeeded, string? error, string? code, string? returnUrl)
+        {
+            var safeReturnUrl = NormalizeReturnUrl(returnUrl);
+            var redirectUrl = succeeded && !string.IsNullOrWhiteSpace(code)
+                ? AppendQueryParameter(safeReturnUrl, "googleLoginCode", code)
+                : AppendQueryParameter(safeReturnUrl, "googleLoginError", error ?? "Google login failed.");
+
+            return Results.LocalRedirect(redirectUrl);
+        }
+
+        private static string AppendQueryParameter(string url, string name, string value)
+        {
+            var fragmentIndex = url.IndexOf('#');
+            var fragment = fragmentIndex >= 0 ? url[fragmentIndex..] : string.Empty;
+            var pathAndQuery = fragmentIndex >= 0 ? url[..fragmentIndex] : url;
+            var separator = pathAndQuery.Contains('?') ? "&" : "?";
+
+            return $"{pathAndQuery}{separator}{Uri.EscapeDataString(name)}={Uri.EscapeDataString(value)}{fragment}";
+        }
+
         private static string NormalizeReturnUrl(string? returnUrl)
         {
             if (string.IsNullOrWhiteSpace(returnUrl) ||
@@ -204,5 +254,7 @@ namespace FamilyChat.Server
 
             return returnUrl;
         }
+
+        private sealed record GoogleLoginTokenRequest(string Code);
     }
 }

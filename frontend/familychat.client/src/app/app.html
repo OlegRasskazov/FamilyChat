@@ -2,7 +2,6 @@
   <section class="auth-panel" aria-labelledby="authTitle">
     <div>
       <p class="eyebrow">FamilyChat</p>
-      <h1 id="authTitle">Welcome back</h1>
     </div>
 
     @if (currentUser(); as user) {
@@ -28,7 +27,7 @@
       <section class="login-dialog" role="dialog" aria-modal="true" aria-labelledby="loginDialogTitle" (click)="$event.stopPropagation()">
         <div class="dialog-header">
           <h2 id="loginDialogTitle">Login</h2>
-          <button type="button" class="icon-button" aria-label="Close login dialog" (click)="closeLoginDialog()">×</button>
+          <button type="button" class="icon-button" aria-label="Close login dialog" (click)="closeLoginDialog()">x</button>
         </div>
 
         <button type="button" class="google-button" (click)="loginWithGoogle()">
@@ -38,33 +37,4 @@
       </section>
     </div>
   }
-
-  <section class="forecast-panel" aria-labelledby="tableLabel">
-    <h2 id="tableLabel">Weather forecast</h2>
-
-    @if (forecasts().length === 0) {
-      <p><em>Loading... Please refresh once the ASP.NET backend has started.</em></p>
-    } @else {
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Temp. (C)</th>
-            <th>Temp. (F)</th>
-            <th>Summary</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for(forecast of forecasts(); track forecast.date) {
-            <tr>
-              <td>{{ forecast.date }}</td>
-              <td>{{ forecast.temperatureC }}</td>
-              <td>{{ forecast.temperatureF }}</td>
-              <td>{{ forecast.summary }}</td>
-            </tr>
-          }
-        </tbody>
-      </table>
-    }
-  </section>
 </main>
